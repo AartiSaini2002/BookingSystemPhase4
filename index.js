@@ -1,5 +1,4 @@
 require("dotenv").config();
-const crypto = require('crypto');
 const express = require("express");
 const app = express();
 const PORT = process.env.IPORT;
@@ -14,48 +13,46 @@ function timestamp() {
 }
 
 // --- Middleware ---
-app.use(express.json()); // Parse application/json
+app.use(express.json());
 
 // Serve everything in ./public as static assets
 const publicDir = path.join(__dirname, "public");
 app.use(express.static(publicDir));
 
 // --- Views (HTML pages) ---
-// GET / -> serve index.html
 app.get("/", (req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
 });
 
-// Optional: GET /resources -> serve resources.html directly
 app.get('/resources', (req, res) => {
   res.sendFile(path.join(publicDir, 'resources.html'));
 });
 
-// --- Postgres pool (reads PG* from .env) ---
+// --- Postgres pool ---
 const pool = new Pool({});
 
 // --- express-validator rules for the payload ---
 const resourceValidators = [
   body('action')
-    .exists({ checkFalsy: true }).withMessage('action is required')
+    .exists().withMessage('action is required')
+    .isString().withMessage('action must be a string')
     .trim()
     .isIn(['create'])
     .withMessage("action must be 'create'"),
 
   body('resourceName')
-  .exists({ checkFalsy: true }).withMessage('resourceName is required')
-  .isString().withMessage('resourceName must be a string')
-  .trim()
-  .isLength({ min: 2, max: 50 }).withMessage('resourceName must be 2–50 characters')
-  .custom(value => !/<[^>]*>/g.test(value)).withMessage('resourceName must not contain HTML'),
+    .exists({ checkFalsy: true }).withMessage('resourceName is required')
+    .isString().withMessage('resourceName must be a string')
+    .trim()
+    .isLength({ min: 5, max: 30 }).withMessage('resourceName must be 5-30 characters')
+    .matches(/^[A-Za-z0-9 ]+$/).withMessage('resourceName can contain only letters, numbers, and spaces'),
 
-body('resourceDescription')
-  .exists({ checkFalsy: true }).withMessage('resourceDescription is required')
-  .isString().withMessage('resourceDescription must be a string')
-  .trim()
-  .isLength({ min: 10, max: 200 }).withMessage('resourceDescription must be 10–200 characters')
-  .custom(value => !/<[^>]*>/g.test(value)).withMessage('resourceDescription must not contain HTML'),
-
+  body('resourceDescription')
+    .exists({ checkFalsy: true }).withMessage('resourceDescription is required')
+    .isString().withMessage('resourceDescription must be a string')
+    .trim()
+    .isLength({ min: 10, max: 50 }).withMessage('resourceDescription must be 10-50 characters')
+    .matches(/^[A-Za-z0-9 ]+$/).withMessage('resourceDescription can contain only letters, numbers, and spaces'),
 
   body('resourceAvailable')
     .exists().withMessage('resourceAvailable is required')
@@ -63,7 +60,7 @@ body('resourceDescription')
     .toBoolean(),
 
   body('resourcePrice')
-    .exists({ checkFalsy: true }).withMessage('resourcePrice is required')
+    .exists().withMessage('resourcePrice is required')
     .isFloat({ min: 0 }).withMessage('resourcePrice must be a non-negative number')
     .toFloat(),
 
@@ -75,12 +72,10 @@ body('resourceDescription')
     .withMessage("resourcePriceUnit must be 'hour', 'day', 'week', or 'month'"),
 ];
 
-
-
 // POST /api/resources -> create
 app.post('/api/resources', resourceValidators, async (req, res) => {
-  // Validate input
   const errors = validationResult(req);
+
   if (!errors.isEmpty()) {
     return res.status(400).json({
       ok: false,
@@ -88,17 +83,15 @@ app.post('/api/resources', resourceValidators, async (req, res) => {
     });
   }
 
-  // Pull normalized values (coerced by express-validator)
-  let {
-    action = '',
-    resourceName = '',
-    resourceDescription = '',
-    resourceAvailable = false,
-    resourcePrice = 0,
-    resourcePriceUnit = ''
+  const {
+    action,
+    resourceName,
+    resourceDescription,
+    resourceAvailable,
+    resourcePrice,
+    resourcePriceUnit
   } = req.body;
 
-  // Log (optional)
   console.log("The client's POST request ", `[${timestamp()}]`);
   console.log('------------------------------');
   console.log('Action ➡️ ', action);
@@ -119,7 +112,7 @@ app.post('/api/resources', resourceValidators, async (req, res) => {
       VALUES ($1, $2, $3, $4, $5)
       RETURNING id, name, description, available, price, price_unit, created_at
     `;
-    
+
     const params = [
       resourceName,
       resourceDescription,
